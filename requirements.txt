@@ -1,0 +1,4 @@
+requests
+koios-api
+pandas
+XlsxWriter
