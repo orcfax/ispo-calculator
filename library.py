@@ -164,8 +164,7 @@ def create_database(db_conn, db_cur):
     """
     db_cur.execute('''CREATE TABLE IF NOT EXISTS wallets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                stake_address CHAR(59) NOT NULL,
-                payment_address CHAR(103) NOT NULL
+                stake_address CHAR(59) NOT NULL
                 )''')
     db_cur.execute('''CREATE UNIQUE INDEX IF NOT EXISTS wallets_stake_address ON wallets(stake_address)''')
 
@@ -186,11 +185,14 @@ def create_database(db_conn, db_cur):
     db_cur.execute('''CREATE INDEX IF NOT EXISTS wallets_history_wallet_id ON wallets_history(wallet_id)''')
     db_cur.execute('''CREATE INDEX IF NOT EXISTS wallets_history_epoch_id ON wallets_history(epoch_id)''')
 
+    """
+    # We don't need wallets addresses for now
     db_cur.execute('''CREATE TABLE IF NOT EXISTS wallets_addresses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 wallet_id INTEGER NOT NULL,
                 payment_address CHAR(103) NOT NULL
                 )''')
     db_cur.execute('''CREATE UNIQUE INDEX IF NOT EXISTS wallets_addresses_p_a ON wallets_addresses(payment_address)''')
+    """
 
     return epochs, pools

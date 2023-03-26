@@ -3,7 +3,6 @@
 
 from library import *
 from koios_api.pool import get_pool_history, get_pool_delegators_history
-from koios_api.account import get_account_addresses
 import sqlite3
 import json
 
@@ -107,7 +106,6 @@ if __name__ == '__main__':
     """
     wallets = {}
     total_delegators_per_epoch = {}
-    account_address = {}
     sorted_epochs = list(delegators_per_epoch)
     sorted_epochs.sort()
     for epoch in sorted_epochs:
@@ -145,42 +143,43 @@ if __name__ == '__main__':
                 print(e)
                 exit(1)
             for delegator in delegators_per_epoch[epoch][pool_id]:
-                if delegator not in account_address:
-                    # get the payment address from the database
-                    cur.execute("SELECT id, payment_address FROM wallets WHERE stake_address = ?", (delegator,))
+                cur.execute("SELECT id FROM wallets WHERE stake_address = ?", (delegator,))
+                row = cur.fetchone()
+                if not row:
+                    cur.execute("INSERT INTO wallets(stake_address) VALUES (?)", (delegator,))
+                    wallet_id = cur.lastrowid
+                    conn.commit()
+                else:
+                    wallet_id = row[0]
+                wallets[delegator] = {'id': wallet_id}
+                active_stake = delegators_per_epoch[epoch][pool_id][delegator]['active_stake']
+                # Calculate the number of delegated epochs for the current wallet
+                try:
+                    prev_epoch_id = epochs[epoch - 1]['id']
+                except KeyError as e:
+                    epochs_delegated = 1
+                else:
+                    cur.execute("SELECT epochs_delegated FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
+                                (wallet_id, prev_epoch_id))
                     row = cur.fetchone()
                     if not row:
-                        # get the payment address from the api
-                        logging.debug(f"Calling the API to find out the wallet payment address for {delegator}")
-                        account_addresses = get_account_addresses(delegator)
-                        try:
-                            account_address[delegator] = account_addresses[0]['addresses'][0]
-                        except IndexError as e:
-                            logging.exception(f"Payment address not found for {delegator}!")
-                            account_address[delegator] = ''
-                        cur.execute("INSERT INTO wallets(stake_address, payment_address) VALUES (?, ?)",
-                                    (delegator, account_address[delegator]))
-                        wallet_id = cur.lastrowid
-                        if account_addresses:
-                            for payment_address in account_addresses[0]['addresses']:
-                                cur.execute("SELECT wallet_id FROM wallets_addresses WHERE payment_address = ?",
-                                            (payment_address,))
-                                row = cur.fetchone()
-                                if not row:
-                                    cur.execute("INSERT INTO wallets_addresses(wallet_id, payment_address) "
-                                                "VALUES(?, ?)", (wallet_id, payment_address))
-                        conn.commit()
+                        epochs_delegated = 1
                     else:
-                        wallet_id = row[0]
-                        account_address[delegator] = row[1]
-                    wallets[delegator] = {'id': wallet_id}
+                        epochs_delegated = row[0] + 1
+                # calculate the rewards based on the active stake and bonuses for multiple epochs delegated
+                if epochs_delegated >= 50:
+                    BONUS = 1.5
+                elif epochs_delegated >= 25:
+                    BONUS = 1.3
+                elif epochs_delegated >= 10:
+                    BONUS = 1.2
+                elif epochs_delegated >= 5:
+                    BONUS = 1.1
                 else:
-                    wallet_id = wallets[delegator]['id']
-                active_stake = delegators_per_epoch[epoch][pool_id][delegator]['active_stake']
-                rewards = int(active_stake * REWARDS_RATE)
+                    BONUS = 1
+                rewards = int(active_stake * REWARDS_RATE * BONUS)
                 record = {
                     'Stake Addr': delegator,
-                    'Wallet Addr': account_address[delegator],
                     'Active Stake': active_stake,
                     'Rewards': rewards
                 }
@@ -190,35 +189,30 @@ if __name__ == '__main__':
                               f"{total_delegators_in_epoch} {delegator}")
                 """
                 Insert record into wallets_history if not already there
+                or update it in case it is already present
                 """
                 epoch_id = epochs[epoch]['id']
                 cur.execute("SELECT id FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
                             (wallet_id, epoch_id))
                 row = cur.fetchone()
                 if not row:
-                    # Calculate the number of delegated epochs for the current wallet
-                    try:
-                        prev_epoch_id = epochs[epoch - 1]['id']
-                    except KeyError as e:
-                        epochs_delegated = 1
-                    else:
-                        cur.execute("SELECT epochs_delegated FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
-                                    (wallet_id, prev_epoch_id))
-                        row = cur.fetchone()
-                        if not row:
-                            epochs_delegated = 1
-                        else:
-                            epochs_delegated = row[0] + 1
                     cur.execute("INSERT INTO wallets_history(wallet_id, epoch_id, pool_id, "
                                 "epochs_delegated, active_stake, rewards_amount) "
                                 "VALUES (?, ?, ?, ?, ?, ?)",
                                 (wallet_id, epoch_id, pools[pool_id]['id'],
                                  epochs_delegated, active_stake, rewards))
-                    conn.commit()
+                else:
+                    cur.execute("UPDATE wallets_history SET pool_id = ?, "
+                                "epochs_delegated = ?, active_stake = ?, rewards_amount = ? "
+                                "WHERE wallet_id = ? AND epoch_id = ?",
+                                (pools[pool_id]['id'], epochs_delegated,
+                                 active_stake, rewards, wallet_id, epoch_id))
+                conn.commit()
+
     """
     Generate the excel file from the database
     """
-    sql = "SELECT w.stake_address, w.payment_address, e.number, wh.epochs_delegated, " \
+    sql = "SELECT w.stake_address, e.number, wh.epochs_delegated, " \
           "wh.active_stake, wh.rewards_amount, p.ticker, w.id, e.id, p.id " \
           "FROM wallets_history wh " \
           "JOIN epochs e ON e.id = wh.epoch_id " \
@@ -230,18 +224,16 @@ if __name__ == '__main__':
     delegators_per_epoch = {}
     for row in rows:
         stake_address = row[0]
-        payment_address = row[1]
-        epoch = row[2]
-        epochs_delegated = row[3]
-        active_stake = row[4]
-        rewards_amount = row[5]
-        pool = row[6]
-        wallet_id = row[7]
+        epoch = row[1]
+        epochs_delegated = row[2]
+        active_stake = row[3]
+        rewards_amount = row[4]
+        pool = row[5]
+        wallet_id = row[6]
         if str(epoch) not in delegators_per_epoch:
             delegators_per_epoch[str(epoch)] = []
         record = {
             'Stake Addr': stake_address,
-            'Wallet Addr': payment_address,
             'Pool': pool,
             'Epochs delegated': epochs_delegated,
             'Active Stake': active_stake,
