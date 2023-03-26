@@ -29,3 +29,15 @@ will be validated one more time, comparing the total active stake of the pools f
 active stake of all delegators for each epoch.
 The script is using the Koios API via the [koios_api](https://github.com/cardano-apexpool/koios-api-python) 
 Python wrapper.
+
+## The API
+### api.py
+Endpoints:
+- /api/v0/get_rewards/{stake_address}
+Accepts a stake address as a parameter. Returns the rewards amount as a string, with decimals, and the stake address. 
+```json
+{
+  "rewards_amount": "100748.025447", 
+  "stake_address": "{stake_address}"
+}
+```

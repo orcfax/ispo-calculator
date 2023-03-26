@@ -2,3 +2,6 @@ requests
 koios-api
 pandas
 XlsxWriter
+Flask
+flask_restx
+werkzeug
