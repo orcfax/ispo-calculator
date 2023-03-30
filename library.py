@@ -179,7 +179,8 @@ def create_database(db_conn, db_cur):
                 pool_id INTEGER NOT NULL,
                 active_stake INTEGER NOT NULL,
                 epochs_delegated INTEGER NOT NULL DEFAULT 1,
-                rewards_amount INTEGER NOT NULL DEFAULT 0,
+                base_rewards INTEGER NOT NULL DEFAULT 0,
+                adjusted_rewards INTEGER NOT NULL DEFAULT 0,
                 submitted INTEGER NOT NULL DEFAULT 0
                 )''')
     db_cur.execute('''CREATE INDEX IF NOT EXISTS wallets_history_wallet_id ON wallets_history(wallet_id)''')
