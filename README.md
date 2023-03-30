@@ -1,5 +1,5 @@
 # ispo-calculator
-An app that lets Orcfax ISPO delegators calculate their rewards
+An app that lets OrcFax ISPO delegators calculate their rewards
 
 ## The backend
 ### config.py
@@ -34,10 +34,23 @@ Python wrapper.
 ### api.py
 Endpoints:
 - /api/v0/get_rewards/{stake_address}
-Accepts a stake address as a parameter. Returns the rewards amount as a string, with decimals, and the stake address. 
+Accepts a stake address as a parameter. Returns the rewards amount (as string, with decimals), for each epoch, 
+the total amount of rewards (as string, with decimals) and the stake address.
 ```json
 {
-  "rewards_amount": "100748.025447", 
-  "stake_address": "{stake_address}"
+  "rewards": [
+    {
+      "active_stake": "1007480254474", 
+      "epoch": "401", 
+      "rewards": "100748.025447"
+    }, 
+    {
+      "active_stake": "1007874485949", 
+      "epoch": "402", 
+      "rewards": "100787.448594"
+    }
+  ], 
+  "stake_address": "stake1.....", 
+  "total_rewards": "201535.474041"
 }
 ```
