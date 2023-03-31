@@ -35,6 +35,7 @@ Python wrapper.
 ### api.py
 Endpoints:
 - /api/v0/get_rewards/{stake_address}
+
 Accepts a stake address as a parameter. Returns the rewards amount (as string, with decimals), for each epoch, 
 the total amount of rewards (as string, with decimals) and the stake address.
 ```json
@@ -53,5 +54,13 @@ the total amount of rewards (as string, with decimals) and the stake address.
   ], 
   "stake_address": "stake1.....", 
   "total_rewards": "201535.474041"
+}
+```
+- /api/v0/get_total_rewards/
+
+Returns the total rewards accumulated by all wallets, including the rewards for the current epoch.
+```json
+{
+  "total_rewards": "7299425.956622"
 }
 ```
