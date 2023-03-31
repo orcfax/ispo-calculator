@@ -21,6 +21,6 @@ DB_NAME = DB_PATH + '/ispo.db'
 API_PORT = 3000
 API_LOG_FILE = os.getenv('API', LOGS_PATH + '/api.log')
 API_NAME = os.getenv('API_NAME', 'Rewards API')
-API_DESCRIPTION = os.getenv('API_DESCRIPTION', 'A simple API for ptoviding the accumulated ISPO rewards')
+API_DESCRIPTION = os.getenv('API_DESCRIPTION', 'A simple API for providing the accumulated ISPO rewards')
 API_VERSION_MAJOR = os.getenv('API_VERSION', 'v0')
 API_VERSION_MINOR = os.getenv('API_VERSION_MINOR', API_VERSION_MAJOR + '.1')

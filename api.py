@@ -2,6 +2,7 @@ from config import *
 from flask import Flask, make_response
 from flask_restx import Api, Resource
 from werkzeug.middleware.proxy_fix import ProxyFix
+from koios_api.address import get_address_info
 import sqlite3
 import logging.handlers
 
@@ -20,7 +21,6 @@ except Exception as e:
 """
 Set up logging
 """
-# logging.basicConfig(filename=API_LOG_FILE, format='%(asctime)s [%(levelname)s]: %(message)s', level=logging.DEBUG)
 handler = logging.handlers.WatchedFileHandler(API_LOG_FILE)
 formatter = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
 handler.setFormatter(formatter)
@@ -54,13 +54,58 @@ class Home(Resource):
 class EventGetRewards(Resource):
     """
     Get the rewards accumulated for this stake address
+    If a payment address is given, the Koios API is used to find out the stake address
     """
-    def get(self, stake_address):
+    @staticmethod
+    def get(stake_address):
+        if len(stake_address) == 103 and stake_address.startswith('addr1'):
+            """
+            Payment address instead of stake address.
+            Find out the stake address. First try to find it out from the database.
+            If not saved into the database, find it out from the Koios API and save it into the database.
+            """
+            payment_address = stake_address
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                cur = conn.cursor()
+                sql = "SELECT w.stake_address FROM wallets w " \
+                      "JOIN wallets_addresses wa ON w.id = wa.wallet_id " \
+                      "WHERE wa.payment_address = ?"
+                cur.execute(sql, (payment_address,))
+                row = cur.fetchone()
+                if row:
+                    stake_address = row[0]
+                else:
+                    addr_info = get_address_info(stake_address)
+                    stake_address = addr_info[0]['stake_address']
+                    sql = "SELECT id FROM wallets WHERE stake_address = ?"
+                    cur.execute(sql, (stake_address,))
+                    row = cur.fetchone()
+                    if row:
+                        wallet_id = row[0]
+                        sql = "INSERT INTO wallets_addresses(wallet_id, payment_address) VALUES (?, ?)"
+                        cur.execute(sql, (wallet_id, payment_address))
+                        conn.commit()
+                    else:
+                        applog.warning(f"/get_rewards/{stake_address}: not found")
+                        msg = {
+                            "error": f"Stake of payment address {stake_address} not found!"
+                        }
+                        return msg
+                conn.close()
+            except Exception as err:
+                applog.error(f"/get_rewards/{stake_address}")
+                applog.exception(err)
+                msg = {
+                    "error": f"Server error: {err}",
+                    "CODE": "SERVER_ERROR"
+                }
+                return msg, 503
         if len(stake_address) != 59 or not stake_address.startswith('stake1'):
             msg = {
-                'error': 'Invalid stake address!'
+                'error': 'Invalid stake address or payment address!'
             }
-            applog.warning(f"'/get_rewards/{stake_address}: invalid stake address")
+            applog.warning(f"'/get_rewards/{stake_address}: invalid stake address or payment address")
             return msg, 406
         try:
             conn = sqlite3.connect(DB_NAME)
@@ -71,10 +116,10 @@ class EventGetRewards(Resource):
             cur.execute(sql, (stake_address,))
             rows = cur.fetchall()
         except Exception as err:
-            applog.warning(f"/get_rewards/{stake_address}")
+            applog.error(f"/get_rewards/{stake_address}")
             applog.exception(err)
             msg = {
-                "error": f"Server error: {e}",
+                "error": f"Server error: {err}",
                 "CODE": "SERVER_ERROR"
             }
             return msg, 503
@@ -107,9 +152,44 @@ class EventGetRewards(Resource):
             else:
                 applog.warning(f"/get_rewards/{stake_address}: not found")
                 msg = {
-                    "error": f"Stake address {stake_address} not found!"
+                    "error": f"Stake of payment address {stake_address} not found!"
                 }
                 return msg
+
+
+@ns.route('/get_total_rewards/')
+@api.response(200, "OK")
+@api.response(503, "Server error")
+class EventGetTotalRewards(Resource):
+    """
+    Get the rewards accumulated for the whole ISPO
+    """
+    @staticmethod
+    def get():
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            cur = conn.cursor()
+            sql = "SELECT sum(adjusted_rewards) FROM wallets_history"
+            cur.execute(sql)
+            row = cur.fetchone()
+        except Exception as err:
+            applog.warning('/get_total_rewards/')
+            applog.exception(err)
+            msg = {
+                "error": f"Server error: {err}",
+                "CODE": "SERVER_ERROR"
+            }
+            return msg, 503
+        else:
+            rewards = str(row[0] / pow(10, DECIMALS))
+            resp = make_response(
+                {
+                    'total_rewards': rewards
+                }
+            )
+            resp.headers['Content-Type'] = 'application/json'
+            applog.info(f"/get_total_rewards: {rewards}")
+            return resp
 
 
 if __name__ == '__main__':
