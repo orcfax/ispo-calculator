@@ -1,5 +1,5 @@
 # ispo-calculator
-An app that lets Orcfax ISPO delegators calculate their rewards
+An app that lets Orcfax ISPO delegators calculate their rewards. It makes data available via an API. The [`ispo-calculator-ui`](https://github.com/orcfax/ispo-calculator-ui) app provides a web front-end to this calculator.
 
 ## The backend
 ### config.py
