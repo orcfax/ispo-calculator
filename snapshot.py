@@ -154,8 +154,18 @@ if __name__ == '__main__':
                 wallets[delegator] = {'id': wallet_id}
                 active_stake = delegators_per_epoch[epoch][pool_id][delegator]['active_stake']
                 # Calculate the number of delegated epochs for the current wallet
-                cur.execute("SELECT count(*) FROM wallets_history WHERE wallet_id = ?", (wallet_id,))
-                epochs_delegated = 1 + cur.fetchone()[0]
+                try:
+                    prev_epoch_id = epochs[epoch - 1]['id']
+                except KeyError as e:
+                    epochs_delegated = 1
+                else:
+                    cur.execute("SELECT epochs_delegated FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
+                                (wallet_id, prev_epoch_id))
+                    row = cur.fetchone()
+                    if not row:
+                        epochs_delegated = 1
+                    else:
+                        epochs_delegated = row[0] + 1
                 # calculate the rewards based on the active stake and bonuses for multiple epochs delegated
                 if epochs_delegated >= 50:
                     BONUS = 1.5
@@ -190,16 +200,19 @@ if __name__ == '__main__':
                 or update it in case it is already present
                 """
                 epoch_id = epochs[epoch]['id']
+                logging.debug(f"epoch_id: {epoch_id}, wallet_id: {wallet_id}")
                 cur.execute("SELECT id FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
                             (wallet_id, epoch_id))
                 row = cur.fetchone()
                 if not row:
+                    logging.debug(f"inserting the wallets_history for wallet {delegator} epoch {epoch}")
                     cur.execute("INSERT INTO wallets_history(wallet_id, epoch_id, pool_id, "
                                 "epochs_delegated, active_stake, base_rewards, adjusted_rewards) "
                                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                                 (wallet_id, epoch_id, pools[pool_id]['id'],
                                  epochs_delegated, active_stake, base_rewards, adjusted_rewards))
                 else:
+                    logging.debug(f"updating the wallets_history for wallet {delegator} epoch {epoch}")
                     cur.execute("UPDATE wallets_history SET pool_id = ?, epochs_delegated = ?, "
                                 "active_stake = ?, base_rewards = ?, adjusted_rewards = ? "
                                 "WHERE wallet_id = ? AND epoch_id = ?",
