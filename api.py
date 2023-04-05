@@ -110,7 +110,18 @@ class EventGetRewards(Resource):
         try:
             conn = sqlite3.connect(DB_NAME)
             cur = conn.cursor()
-            sql = "SELECT e.number, wh.active_stake, wh.adjusted_rewards " \
+            sql = "SELECT max(e.number) FROM epochs e JOIN pools_epochs pe ON e.id = pe.epoch_id"
+            cur.execute(sql)
+            row_epoch = cur.fetchone()
+            sql = "SELECT sum(base_rewards), sum(adjusted_rewards) FROM wallets_history"
+            cur.execute(sql)
+            row_rewards = cur.fetchone()
+            sql = "SELECT ps.active_stake, ps.live_stake " \
+                  "FROM pools_stake ps JOIN pools p ON p.id = ps.pool_id " \
+                  "WHERE p.pool_id_bech32 = ?"
+            cur.execute(sql, (POOL_IDS_BECH32[0],))
+            row_stake = cur.fetchone()
+            sql = "SELECT e.number, wh.active_stake, wh.base_rewards, wh.adjusted_rewards " \
                   "FROM wallets_history wh JOIN epochs e on e.id = wh.epoch_id " \
                   "JOIN wallets w ON wh.wallet_id = w.id WHERE w.stake_address = ?"
             cur.execute(sql, (stake_address,))
@@ -124,30 +135,51 @@ class EventGetRewards(Resource):
             }
             return msg, 503
         else:
+            latest_epoch = row_epoch[0]
+            ispo_base_rewards = row_rewards[0] / pow(10, DECIMALS)
+            ispo_adjusted_rewards = row_rewards[1] / pow(10, DECIMALS)
+            active_stake = row_stake[0]
+            live_stake = row_stake[1]
             rewards = []
-            total_rewards = 0
+            total_base_rewards = 0
+            total_adjusted_rewards = 0
             for row in rows:
-                epoch = str(row[0])
-                active_stake = str(row[1])
-                total_rewards += row[2] / pow(10, DECIMALS)
-                rewards_amount = str(row[2] / pow(10, DECIMALS))
+                epoch = row[0]
+                active_stake = row[1]
+                base_rewards = row[2] / pow(10, DECIMALS)
+                adjusted_rewards = row[3] / pow(10, DECIMALS)
+                total_base_rewards += row[2] / pow(10, DECIMALS)
+                total_adjusted_rewards += row[3] / pow(10, DECIMALS)
                 rewards.append(
                     {
-                        'epoch': epoch,
-                        'active_stake': active_stake,
-                        'rewards': rewards_amount
+                        'epoch': str(epoch),
+                        'active_stake': str(active_stake),
+                        'base_rewards': str(base_rewards),
+                        'bonus': str(adjusted_rewards - base_rewards),
+                        'adjusted_rewards': str(adjusted_rewards)
                     }
                 )
-            if total_rewards > 0:
+            if total_base_rewards > 0:
                 resp = make_response(
                     {
+                        'latest_epoch': str(latest_epoch),
                         'stake_address': stake_address,
+                        'active_stake': active_stake,
+                        'live_stake': live_stake,
                         'rewards': rewards,
-                        'total_rewards': str(total_rewards)
+                        'bonus': str(total_adjusted_rewards - total_base_rewards),
+                        'total_base_rewards': str(total_base_rewards),
+                        'total_bonus': str(total_adjusted_rewards - total_base_rewards),
+                        'total_adjusted_rewards': str(total_adjusted_rewards),
+                        'ispo_total_base_rewards': str(ispo_base_rewards),
+                        'ispo_total_bonus': str(ispo_adjusted_rewards - ispo_base_rewards),
+                        'ispo_total_adjusted_rewards': str(ispo_adjusted_rewards),
+                        'rewards_percentage_from_total': str(100 * total_adjusted_rewards / ispo_adjusted_rewards) + ' %'
                     }
                 )
                 resp.headers['Content-Type'] = 'application/json'
-                applog.info(f"/get_rewards/{stake_address}: total rewards =  {total_rewards}")
+                applog.info(f"/get_rewards/{stake_address}: total base rewards =  {total_base_rewards}, "
+                            f"total adjusted rewards =  {total_adjusted_rewards}")
                 return resp
             else:
                 applog.warning(f"/get_rewards/{stake_address}: not found")
@@ -177,6 +209,9 @@ class EventGetTotalRewards(Resource):
                   "WHERE p.pool_id_bech32 = ?"
             cur.execute(sql, (POOL_IDS_BECH32[0],))
             row_stake = cur.fetchone()
+            sql = "SELECT max(e.number) FROM epochs e JOIN pools_epochs pe ON e.id = pe.epoch_id"
+            cur.execute(sql)
+            row_epoch = cur.fetchone()
         except Exception as err:
             applog.warning('/get_total_rewards/')
             applog.exception(err)
@@ -188,11 +223,15 @@ class EventGetTotalRewards(Resource):
         else:
             base_rewards = str(row_rewards[0] / pow(10, DECIMALS))
             adjusted_rewards = str(row_rewards[1] / pow(10, DECIMALS))
+            bonus = str((row_rewards[1] - row_rewards[0]) / pow(10, DECIMALS))
             active_stake = row_stake[0]
             live_stake = row_stake[1]
+            epoch = row_epoch[0]
             resp = make_response(
                 {
+                    'latest_epoch': epoch,
                     'base_rewards': base_rewards,
+                    'bonus': bonus,
                     'adjusted_rewards': adjusted_rewards,
                     'active_stake': active_stake,
                     'live_stake': live_stake
