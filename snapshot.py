@@ -205,14 +205,12 @@ if __name__ == '__main__':
                             (wallet_id, epoch_id))
                 row = cur.fetchone()
                 if not row:
-                    logging.debug(f"inserting the wallets_history for wallet {delegator} epoch {epoch}")
                     cur.execute("INSERT INTO wallets_history(wallet_id, epoch_id, pool_id, "
                                 "epochs_delegated, active_stake, base_rewards, adjusted_rewards) "
                                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                                 (wallet_id, epoch_id, pools[pool_id]['id'],
                                  epochs_delegated, active_stake, base_rewards, adjusted_rewards))
                 else:
-                    logging.debug(f"updating the wallets_history for wallet {delegator} epoch {epoch}")
                     cur.execute("UPDATE wallets_history SET pool_id = ?, epochs_delegated = ?, "
                                 "active_stake = ?, base_rewards = ?, adjusted_rewards = ? "
                                 "WHERE wallet_id = ? AND epoch_id = ?",
