@@ -88,13 +88,19 @@ def pool_data(db_conn, db_cur, pool_id_bech32):
             pool_info = get_pool_info(pool_id_bech32)
         try:
             ticker = pool_info[0]['meta_json']['ticker']
+            active_stake = pool_info[0]['active_stake']
+            live_stake = pool_info[0]['live_stake']
         except TypeError:
             ticker = ''
+            active_stake = 0
+            live_stake = 0
         logging.debug('Adding pool %s (%s) into the database' % (pool_id_bech32, ticker))
         sql = "INSERT INTO pools(pool_id_bech32, ticker) VALUES (?, ?)"
         db_cur.execute(sql, (pool_id_bech32, ticker))
-        db_conn.commit()
         pool_id = db_cur.lastrowid
+        sql = "INSERT INTO pools_stake(pool_id, active_stake, live_stake) VALUES (?, ?, ?)"
+        db_cur.execute(sql, (pool_id, active_stake, live_stake))
+        db_conn.commit()
     else:
         logging.debug('Pool %s already exists in the database' % pool_id_bech32)
         pool_id = row[0]
@@ -140,6 +146,17 @@ def create_database(db_conn, db_cur):
                 ticker CHAR(5)
                 )''')
     db_cur.execute('''CREATE UNIQUE INDEX IF NOT EXISTS pools_pool_id_bech32 ON pools(pool_id_bech32)''')
+
+    """
+    Pools stake table
+    Live delegation and active delegation for each pool
+    """
+    db_cur.execute('''CREATE TABLE IF NOT EXISTS pools_stake (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                pool_id INTEGER NOT NULL,
+                active_stake INTEGER NOT NULL,
+                live_stake INTEGER NOT NULL
+                )''')
 
     pools = {}
     for pool_id_bech32 in POOL_IDS_BECH32:

@@ -169,9 +169,14 @@ class EventGetTotalRewards(Resource):
         try:
             conn = sqlite3.connect(DB_NAME)
             cur = conn.cursor()
-            sql = "SELECT sum(adjusted_rewards) FROM wallets_history"
+            sql = "SELECT sum(base_rewards), sum(adjusted_rewards) FROM wallets_history"
             cur.execute(sql)
-            row = cur.fetchone()
+            row_rewards = cur.fetchone()
+            sql = "SELECT ps.active_stake, ps.live_stake " \
+                  "FROM pools_stake ps JOIN pools p ON p.id = ps.pool_id " \
+                  "WHERE p.pool_id_bech32 = ?"
+            cur.execute(sql, (POOL_IDS_BECH32[0],))
+            row_stake = cur.fetchone()
         except Exception as err:
             applog.warning('/get_total_rewards/')
             applog.exception(err)
@@ -181,14 +186,20 @@ class EventGetTotalRewards(Resource):
             }
             return msg, 503
         else:
-            rewards = str(row[0] / pow(10, DECIMALS))
+            base_rewards = str(row_rewards[0] / pow(10, DECIMALS))
+            adjusted_rewards = str(row_rewards[1] / pow(10, DECIMALS))
+            active_stake = row_stake[0]
+            live_stake = row_stake[1]
             resp = make_response(
                 {
-                    'total_rewards': rewards
+                    'base_rewards': base_rewards,
+                    'adjusted_rewards': adjusted_rewards,
+                    'active_stake': active_stake,
+                    'live_stake': live_stake
                 }
             )
             resp.headers['Content-Type'] = 'application/json'
-            applog.info(f"/get_total_rewards: {rewards}")
+            applog.info(f"/get_total_rewards: base rewards: {base_rewards}, adjusted rewards: {adjusted_rewards}")
             return resp
 
 
