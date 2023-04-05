@@ -138,14 +138,14 @@ class EventGetRewards(Resource):
             latest_epoch = row_epoch[0]
             ispo_base_rewards = row_rewards[0] / pow(10, DECIMALS)
             ispo_adjusted_rewards = row_rewards[1] / pow(10, DECIMALS)
-            active_stake = row_stake[0]
-            live_stake = row_stake[1]
+            active_stake = "{:,}".format(int(row_stake[0] / 1000000))
+            live_stake = "{:,}".format(int(row_stake[1] / 1000000))
             rewards = []
             total_base_rewards = 0
             total_adjusted_rewards = 0
             for row in rows:
                 epoch = row[0]
-                active_stake = row[1]
+                epoch_active_stake = row[1] / 1000000
                 base_rewards = row[2] / pow(10, DECIMALS)
                 adjusted_rewards = row[3] / pow(10, DECIMALS)
                 total_base_rewards += row[2] / pow(10, DECIMALS)
@@ -153,9 +153,9 @@ class EventGetRewards(Resource):
                 rewards.append(
                     {
                         'epoch': str(epoch),
-                        'active_stake': str(active_stake),
+                        'active_stake': str(epoch_active_stake),
                         'base_rewards': str(base_rewards),
-                        'bonus': str(adjusted_rewards - base_rewards),
+                        'bonus': str(round((adjusted_rewards - base_rewards), 4)),
                         'adjusted_rewards': str(adjusted_rewards)
                     }
                 )
@@ -164,17 +164,18 @@ class EventGetRewards(Resource):
                     {
                         'latest_epoch': str(latest_epoch),
                         'stake_address': stake_address,
-                        'active_stake': active_stake,
-                        'live_stake': live_stake,
+                        'active_stake': str(active_stake),
+                        'live_stake': str(live_stake),
                         'rewards': rewards,
-                        'bonus': str(total_adjusted_rewards - total_base_rewards),
+                        'bonus': str(round((total_adjusted_rewards - total_base_rewards), 4)),
                         'total_base_rewards': str(total_base_rewards),
-                        'total_bonus': str(total_adjusted_rewards - total_base_rewards),
+                        'total_bonus': str(round((total_adjusted_rewards - total_base_rewards), 4)),
                         'total_adjusted_rewards': str(total_adjusted_rewards),
                         'ispo_total_base_rewards': str(ispo_base_rewards),
-                        'ispo_total_bonus': str(ispo_adjusted_rewards - ispo_base_rewards),
+                        'ispo_total_bonus': str(round((ispo_adjusted_rewards - ispo_base_rewards), 4)),
                         'ispo_total_adjusted_rewards': str(ispo_adjusted_rewards),
-                        'rewards_percentage_from_total': str(100 * total_adjusted_rewards / ispo_adjusted_rewards) + ' %'
+                        'rewards_percentage_from_total':
+                            str(round((100 * total_adjusted_rewards / ispo_adjusted_rewards), 10)) + ' %'
                     }
                 )
                 resp.headers['Content-Type'] = 'application/json'
@@ -184,7 +185,7 @@ class EventGetRewards(Resource):
             else:
                 applog.warning(f"/get_rewards/{stake_address}: not found")
                 msg = {
-                    "error": f"Stake of payment address {stake_address} not found!"
+                    "error": f"Stake or payment address {stake_address} not found!"
                 }
                 return msg
 
@@ -221,20 +222,20 @@ class EventGetTotalRewards(Resource):
             }
             return msg, 503
         else:
-            base_rewards = str(row_rewards[0] / pow(10, DECIMALS))
-            adjusted_rewards = str(row_rewards[1] / pow(10, DECIMALS))
-            bonus = str((row_rewards[1] - row_rewards[0]) / pow(10, DECIMALS))
-            active_stake = row_stake[0]
-            live_stake = row_stake[1]
+            base_rewards = row_rewards[0] / pow(10, DECIMALS)
+            adjusted_rewards = row_rewards[1] / pow(10, DECIMALS)
+            bonus = round(((row_rewards[1] - row_rewards[0]) / pow(10, DECIMALS)), 4)
+            active_stake = row_stake[0] / 1000000
+            live_stake = row_stake[1] / 1000000
             epoch = row_epoch[0]
             resp = make_response(
                 {
-                    'latest_epoch': epoch,
-                    'base_rewards': base_rewards,
-                    'bonus': bonus,
-                    'adjusted_rewards': adjusted_rewards,
-                    'active_stake': active_stake,
-                    'live_stake': live_stake
+                    'latest_epoch': str(epoch),
+                    'base_rewards': str(base_rewards),
+                    'bonus': str(bonus),
+                    'adjusted_rewards': str(adjusted_rewards),
+                    'active_stake': str(active_stake),
+                    'live_stake': str(live_stake)
                 }
             )
             resp.headers['Content-Type'] = 'application/json'
