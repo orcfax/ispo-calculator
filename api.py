@@ -1,4 +1,4 @@
-from config import *
+from library import *
 from flask import Flask, make_response
 from flask_restx import Api, Resource
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -77,7 +77,10 @@ class EventGetRewards(Resource):
                     stake_address = row[0]
                 else:
                     addr_info = get_address_info(stake_address)
-                    stake_address = addr_info[0]['stake_address']
+                    if addr_info:
+                        stake_address = addr_info[0]['stake_address']
+                    else:
+                        stake_address = get_stake_address(payment_address)
                     sql = "SELECT id FROM wallets WHERE stake_address = ?"
                     cur.execute(sql, (stake_address,))
                     row = cur.fetchone()
@@ -138,8 +141,9 @@ class EventGetRewards(Resource):
             latest_epoch = row_epoch[0]
             ispo_base_rewards = row_rewards[0] / pow(10, DECIMALS)
             ispo_adjusted_rewards = row_rewards[1] / pow(10, DECIMALS)
-            active_stake = "{:,}".format(int(row_stake[0] / 1000000))
-            live_stake = "{:,}".format(int(row_stake[1] / 1000000))
+            total_ispo_rewards_percent = (row_rewards[1] / pow(10, DECIMALS)) / 100000000 * 100
+            active_stake = int(row_stake[0] / 1000000)
+            live_stake = int(row_stake[1] / 1000000)
             rewards = []
             total_base_rewards = 0
             total_adjusted_rewards = 0
@@ -153,10 +157,10 @@ class EventGetRewards(Resource):
                 rewards.append(
                     {
                         'epoch': str(epoch),
-                        'active_stake': str(epoch_active_stake),
-                        'base_rewards': str(base_rewards),
-                        'bonus': str(round((adjusted_rewards - base_rewards), 4)),
-                        'adjusted_rewards': str(adjusted_rewards)
+                        'active_stake': "{:,.6f}".format(epoch_active_stake),
+                        'base_rewards': "{:,.6f}".format(base_rewards),
+                        'bonus': "{:,.4f}".format(round((adjusted_rewards - base_rewards), 4)),
+                        'adjusted_rewards': "{:,.6f}".format(adjusted_rewards)
                     }
                 )
             if total_base_rewards > 0:
@@ -164,18 +168,19 @@ class EventGetRewards(Resource):
                     {
                         'latest_epoch': str(latest_epoch),
                         'stake_address': stake_address,
-                        'active_stake': str(active_stake),
-                        'live_stake': str(live_stake),
+                        'active_stake': "{:,}".format(active_stake),
+                        'live_stake': "{:,}".format(live_stake),
                         'rewards': rewards,
-                        'bonus': str(round((total_adjusted_rewards - total_base_rewards), 4)),
-                        'total_base_rewards': str(total_base_rewards),
-                        'total_bonus': str(round((total_adjusted_rewards - total_base_rewards), 4)),
-                        'total_adjusted_rewards': str(total_adjusted_rewards),
-                        'ispo_total_base_rewards': str(ispo_base_rewards),
-                        'ispo_total_bonus': str(round((ispo_adjusted_rewards - ispo_base_rewards), 4)),
-                        'ispo_total_adjusted_rewards': str(ispo_adjusted_rewards),
+                        'bonus': "{:,.4f}".format(round((total_adjusted_rewards - total_base_rewards), 4)),
+                        'total_base_rewards': "{:,.4f}".format(total_base_rewards),
+                        'total_bonus': "{:,.4f}".format(round((total_adjusted_rewards - total_base_rewards), 4)),
+                        'total_adjusted_rewards': "{:,.6f}".format(total_adjusted_rewards),
+                        'ispo_total_base_rewards': "{:,.6f}".format(ispo_base_rewards),
+                        'ispo_total_bonus': "{:,.4f}".format(round((ispo_adjusted_rewards - ispo_base_rewards), 4)),
+                        'ispo_total_adjusted_rewards': "{:,.6f}".format(ispo_adjusted_rewards),
+                        'total_ispo_rewards_percent': "{:,.2f}".format(total_ispo_rewards_percent) + '%',
                         'rewards_percentage_from_total':
-                            str(round((100 * total_adjusted_rewards / ispo_adjusted_rewards), 10)) + ' %'
+                            str(round((100 * total_adjusted_rewards / ispo_adjusted_rewards), 10)) + '%'
                     }
                 )
                 resp.headers['Content-Type'] = 'application/json'
@@ -185,7 +190,8 @@ class EventGetRewards(Resource):
             else:
                 applog.warning(f"/get_rewards/{stake_address}: not found")
                 msg = {
-                    "error": f"Stake or payment address {stake_address} not found!"
+                    "error": f"No rewards found for this wallet; your address might be "
+                             f"incorrect or your stake is not active yet"
                 }
                 return msg
 
