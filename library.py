@@ -6,6 +6,7 @@ from koios_api.pool import get_pool_info
 from datetime import datetime
 import os
 import logging
+import subprocess
 
 """
 Create the folders if they don't exist, and create the .gitignore files i
@@ -211,3 +212,48 @@ def create_database(db_conn, db_cur):
     db_cur.execute('''CREATE UNIQUE INDEX IF NOT EXISTS wallets_addresses_p_a ON wallets_addresses(payment_address)''')
 
     return epochs, pools
+
+
+def get_stake_address(wallet_addr):
+    valid_stake_address = check_if_staking_wallet(wallet_addr)
+    if valid_stake_address:
+        decoded = decode_wallet_addr(wallet_addr)
+        stake_key = create_stake_key(decoded)
+    else:
+        stake_key = ''
+    return stake_key
+
+
+def check_if_staking_wallet(wallet_addr):
+    valid_stake_address = False
+    if len(wallet_addr) > 63:
+        valid_stake_address = True
+    else:
+        print('This is not a staking wallet')
+    return valid_stake_address
+
+
+def decode_wallet_addr(wallet_addr):
+    args = '/usr/local/bin/bech32 <<< ' + wallet_addr
+    result = subprocess.check_output(args, shell=True, executable='/bin/bash')
+    result = result.decode("utf-8")
+    decoded = result.replace('\n', '')
+    return decoded
+
+
+def decode_pool_id(hex_id):
+    args = '/usr/local/bin/bech32 pool <<< ' + hex_id
+    result = subprocess.check_output(args, shell=True, executable='/bin/bash')
+    result = result.decode("utf-8")
+    decoded = result.replace('\n', '')
+    return decoded
+
+
+def create_stake_key(decoded):
+    last_chars = decoded[-56:]
+    main_net_stake_hex = ('e1' + last_chars)
+    args = '/usr/local/bin/bech32 stake <<< ' + main_net_stake_hex
+    result = subprocess.check_output(args, shell=True, executable='/bin/bash')
+    result = result.decode("utf-8")
+    stake_key = result.replace('\n', '')
+    return stake_key
