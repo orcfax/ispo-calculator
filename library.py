@@ -177,6 +177,19 @@ def create_database(db_conn, db_cur):
                 )''')
 
     """
+    Live stake snapshot
+    Populated once when the live stake is above 69M, the saturation point
+    """
+    db_cur.execute('''CREATE TABLE IF NOT EXISTS live_stake_snapshot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                pool_id INTEGER NOT NULL,
+                wallet_id INTEGER NOT NULL,
+                live_stake INTEGER NOT NULL,
+                active_epoch_no INTEGER NOT NULL,
+                latest_delegation_tx CHAR(64) NOT NULL
+                )''')
+
+    """
     Wallets table
     Stake address and payment address for each wallet, one record per wallet
     """
