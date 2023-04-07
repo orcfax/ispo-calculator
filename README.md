@@ -1,5 +1,7 @@
 # ispo-calculator
-An app that lets Orcfax ISPO delegators calculate their rewards. It makes data available via an API. The [`ispo-calculator-ui`](https://github.com/orcfax/ispo-calculator-ui) app provides a web front-end to this calculator.
+An app that lets Orcfax ISPO delegators calculate their rewards. It makes data available via an API. 
+The [`ispo-calculator-ui`](https://github.com/orcfax/ispo-calculator-ui) app provides a web front-end to this calculator.
+
 
 ## The backend
 ### config.py
@@ -34,10 +36,66 @@ Python wrapper.
 ### api.py
 Endpoints:
 - /api/v0/get_rewards/{stake_address}
-Accepts a stake address as a parameter. Returns the rewards amount as a string, with decimals, and the stake address. 
+
+Accepts a stake address as a parameter. Returns the rewards amount (as string, with decimals), for each epoch, 
+the total amount of rewards (as string, with decimals) and the stake address.
 ```json
 {
-  "rewards_amount": "100748.025447", 
-  "stake_address": "{stake_address}"
+  "active_stake": "58,939,667",
+  "bonus": "0.0000",
+  "ispo_total_adjusted_rewards": "18,800,318.910442",
+  "ispo_total_base_rewards": "18,799,730.656773",
+  "ispo_total_bonus": "588.2537",
+  "latest_epoch": "404",
+  "live_stake": "67,437,922",
+  "rewards": [
+    {
+      "active_stake": "1,007,480.254474",
+      "adjusted_rewards": "100,748.025447",
+      "base_rewards": "100,748.025447",
+      "bonus": "0.0000",
+      "epoch": "401"
+    },
+    {
+      "active_stake": "1,007,874.485949",
+      "adjusted_rewards": "100,787.448594",
+      "base_rewards": "100,787.448594",
+      "bonus": "0.0000",
+      "epoch": "402"
+    },
+    {
+      "active_stake": "1,008,387.301918",
+      "adjusted_rewards": "100,838.730191",
+      "base_rewards": "100,838.730191",
+      "bonus": "0.0000",
+      "epoch": "403"
+    },
+    {
+      "active_stake": "1,008,393.994201",
+      "adjusted_rewards": "100,839.399420",
+      "base_rewards": "100,839.399420",
+      "bonus": "0.0000",
+      "epoch": "404"
+    }
+  ],
+  "rewards_percentage_from_total": "2.1447168294%",
+  "stake_address": "stake1....",
+  "total_adjusted_rewards": "403,213.603652",
+  "total_base_rewards": "403,213.6037",
+  "total_bonus": "0.0000",
+  "total_ispo_rewards_percent": "18.80%"
+}
+```
+- /api/v0/get_total_rewards/
+
+Returns the total rewards accumulated by all wallets, including the rewards for the current epoch.
+```json
+{
+  "active_stake": "58939667.95319",
+  "adjusted_rewards": "18800318.9104418",
+  "base_rewards": "18799730.656773",
+  "bonus": "588.2537",
+  "latest_epoch": "404",
+  "live_stake": "67437922.194257"
 }
 ```

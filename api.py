@@ -1,10 +1,10 @@
-from config import *
-from flask import Flask, request, make_response
+from library import *
+from flask import Flask, make_response
 from flask_restx import Api, Resource
 from werkzeug.middleware.proxy_fix import ProxyFix
+from koios_api.address import get_address_info
 import sqlite3
 import logging.handlers
-import datetime
 
 """
 Create some required folders to store log and transaction file
@@ -21,14 +21,19 @@ except Exception as e:
 """
 Set up logging
 """
-logging.basicConfig(filename=API_LOG_FILE, format='%(asctime)s [%(levelname)s]: %(message)s', level=logging.DEBUG)
+handler = logging.handlers.WatchedFileHandler(API_LOG_FILE)
+formatter = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
+handler.setFormatter(formatter)
+
+applog = logging.getLogger('api')
+applog.addHandler(handler)
+applog.setLevel(logging.DEBUG)
 
 """
 Create the Flask application
 """
 app = Flask(__name__)
 app.config['DEBUG'] = True
-app.config['UPLOAD_FOLDER'] = FILES_PATH
 app.wsgi_app = ProxyFix(app.wsgi_app)
 
 api = Api(app, version=API_VERSION_MINOR, title=API_NAME, description=API_DESCRIPTION,)
@@ -49,48 +54,203 @@ class Home(Resource):
 class EventGetRewards(Resource):
     """
     Get the rewards accumulated for this stake address
+    If a payment address is given, the Koios API is used to find out the stake address
     """
-    def get(self, stake_address):
+    @staticmethod
+    def get(stake_address):
+        if len(stake_address) == 103 and stake_address.startswith('addr1'):
+            """
+            Payment address instead of stake address.
+            Find out the stake address. First try to find it out from the database.
+            If not saved into the database, find it out from the Koios API and save it into the database.
+            """
+            payment_address = stake_address
+            try:
+                conn = sqlite3.connect(DB_NAME)
+                cur = conn.cursor()
+                sql = "SELECT w.stake_address FROM wallets w " \
+                      "JOIN wallets_addresses wa ON w.id = wa.wallet_id " \
+                      "WHERE wa.payment_address = ?"
+                cur.execute(sql, (payment_address,))
+                row = cur.fetchone()
+                if row:
+                    stake_address = row[0]
+                else:
+                    addr_info = get_address_info(stake_address)
+                    if addr_info:
+                        stake_address = addr_info[0]['stake_address']
+                    else:
+                        stake_address = get_stake_address(payment_address)
+                    sql = "SELECT id FROM wallets WHERE stake_address = ?"
+                    cur.execute(sql, (stake_address,))
+                    row = cur.fetchone()
+                    if row:
+                        wallet_id = row[0]
+                        sql = "INSERT INTO wallets_addresses(wallet_id, payment_address) VALUES (?, ?)"
+                        cur.execute(sql, (wallet_id, payment_address))
+                        conn.commit()
+                    else:
+                        applog.warning(f"/get_rewards/{stake_address}: not found")
+                        msg = {
+                            "error": f"Stake of payment address {stake_address} not found!"
+                        }
+                        return msg
+                conn.close()
+            except Exception as err:
+                applog.error(f"/get_rewards/{stake_address}")
+                applog.exception(err)
+                msg = {
+                    "error": f"Server error: {err}",
+                    "CODE": "SERVER_ERROR"
+                }
+                return msg, 503
         if len(stake_address) != 59 or not stake_address.startswith('stake1'):
             msg = {
-                'error': 'Invalid stake address!'
+                'error': 'Invalid stake address or payment address!'
             }
-            logging.warning(f"'/get_rewards/{stake_address}: invalid stake address")
+            applog.warning(f"'/get_rewards/{stake_address}: invalid stake address or payment address")
             return msg, 406
         try:
             conn = sqlite3.connect(DB_NAME)
             cur = conn.cursor()
-            cur.execute("SELECT sum(rewards_amount) FROM wallets_history wh "
-                        "JOIN wallets w ON wh.wallet_id = w.id WHERE w.stake_address = ?", (stake_address,))
-            row = cur.fetchone()
+            sql = "SELECT max(e.number) FROM epochs e JOIN pools_epochs pe ON e.id = pe.epoch_id"
+            cur.execute(sql)
+            row_epoch = cur.fetchone()
+            sql = "SELECT sum(base_rewards), sum(adjusted_rewards) FROM wallets_history"
+            cur.execute(sql)
+            row_rewards = cur.fetchone()
+            sql = "SELECT ps.active_stake, ps.live_stake " \
+                  "FROM pools_stake ps JOIN pools p ON p.id = ps.pool_id " \
+                  "WHERE p.pool_id_bech32 = ?"
+            cur.execute(sql, (POOL_IDS_BECH32[0],))
+            row_stake = cur.fetchone()
+            sql = "SELECT e.number, wh.active_stake, wh.base_rewards, wh.adjusted_rewards " \
+                  "FROM wallets_history wh JOIN epochs e on e.id = wh.epoch_id " \
+                  "JOIN wallets w ON wh.wallet_id = w.id WHERE w.stake_address = ?"
+            cur.execute(sql, (stake_address,))
+            rows = cur.fetchall()
         except Exception as err:
-            logging.warning(f"'/get_rewards/{stake_address}")
-            logging.exception(err)
+            applog.error(f"/get_rewards/{stake_address}")
+            applog.exception(err)
             msg = {
-                "error": f"Server error: {e}",
+                "error": f"Server error: {err}",
                 "CODE": "SERVER_ERROR"
             }
             return msg, 503
         else:
-            if row[0]:
-                rewards = {
-                    "stake_address": stake_address,
-                    "rewards_amount": str(row[0] / pow(10, DECIMALS))
-                }
-                resp = make_response(rewards)
+            latest_epoch = row_epoch[0]
+            ispo_base_rewards = row_rewards[0] / pow(10, DECIMALS)
+            ispo_adjusted_rewards = row_rewards[1] / pow(10, DECIMALS)
+            total_ispo_rewards_percent = (row_rewards[1] / pow(10, DECIMALS)) / 100000000 * 100
+            active_stake = int(row_stake[0] / 1000000)
+            live_stake = int(row_stake[1] / 1000000)
+            rewards = []
+            total_base_rewards = 0
+            total_adjusted_rewards = 0
+            for row in rows:
+                epoch = row[0]
+                epoch_active_stake = row[1] / 1000000
+                base_rewards = row[2] / pow(10, DECIMALS)
+                adjusted_rewards = row[3] / pow(10, DECIMALS)
+                total_base_rewards += row[2] / pow(10, DECIMALS)
+                total_adjusted_rewards += row[3] / pow(10, DECIMALS)
+                rewards.append(
+                    {
+                        'epoch': str(epoch),
+                        'active_stake': "{:,.6f}".format(epoch_active_stake),
+                        'base_rewards': "{:,.6f}".format(base_rewards),
+                        'bonus': "{:,.4f}".format(round((adjusted_rewards - base_rewards), 4)),
+                        'adjusted_rewards': "{:,.6f}".format(adjusted_rewards)
+                    }
+                )
+            if total_base_rewards > 0:
+                resp = make_response(
+                    {
+                        'latest_epoch': str(latest_epoch),
+                        'stake_address': stake_address,
+                        'active_stake': "{:,}".format(active_stake),
+                        'live_stake': "{:,}".format(live_stake),
+                        'rewards': rewards,
+                        'bonus': "{:,.4f}".format(round((total_adjusted_rewards - total_base_rewards), 4)),
+                        'total_base_rewards': "{:,.4f}".format(total_base_rewards),
+                        'total_bonus': "{:,.4f}".format(round((total_adjusted_rewards - total_base_rewards), 4)),
+                        'total_adjusted_rewards': "{:,.6f}".format(total_adjusted_rewards),
+                        'ispo_total_base_rewards': "{:,.6f}".format(ispo_base_rewards),
+                        'ispo_total_bonus': "{:,.4f}".format(round((ispo_adjusted_rewards - ispo_base_rewards), 4)),
+                        'ispo_total_adjusted_rewards': "{:,.6f}".format(ispo_adjusted_rewards),
+                        'total_ispo_rewards_percent': "{:,.2f}".format(total_ispo_rewards_percent) + '%',
+                        'rewards_percentage_from_total':
+                            str(round((100 * total_adjusted_rewards / ispo_adjusted_rewards), 10)) + '%'
+                    }
+                )
                 resp.headers['Content-Type'] = 'application/json'
-                logging.info(f"'/get_rewards/{stake_address}: {row[0]}")
+                applog.info(f"/get_rewards/{stake_address}: total base rewards =  {total_base_rewards}, "
+                            f"total adjusted rewards =  {total_adjusted_rewards}")
                 return resp
             else:
-                logging.warning(f"'/get_rewards/{stake_address}: not found")
+                applog.warning(f"/get_rewards/{stake_address}: not found")
                 msg = {
-                    "error": f"Stake address {stake_address} not found!"
+                    "error": f"No rewards found for this wallet; your address might be "
+                             f"incorrect or your stake is not active yet"
                 }
                 return msg
 
 
+@ns.route('/get_total_rewards/')
+@api.response(200, "OK")
+@api.response(503, "Server error")
+class EventGetTotalRewards(Resource):
+    """
+    Get the rewards accumulated for the whole ISPO
+    """
+    @staticmethod
+    def get():
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            cur = conn.cursor()
+            sql = "SELECT sum(base_rewards), sum(adjusted_rewards) FROM wallets_history"
+            cur.execute(sql)
+            row_rewards = cur.fetchone()
+            sql = "SELECT ps.active_stake, ps.live_stake " \
+                  "FROM pools_stake ps JOIN pools p ON p.id = ps.pool_id " \
+                  "WHERE p.pool_id_bech32 = ?"
+            cur.execute(sql, (POOL_IDS_BECH32[0],))
+            row_stake = cur.fetchone()
+            sql = "SELECT max(e.number) FROM epochs e JOIN pools_epochs pe ON e.id = pe.epoch_id"
+            cur.execute(sql)
+            row_epoch = cur.fetchone()
+        except Exception as err:
+            applog.warning('/get_total_rewards/')
+            applog.exception(err)
+            msg = {
+                "error": f"Server error: {err}",
+                "CODE": "SERVER_ERROR"
+            }
+            return msg, 503
+        else:
+            base_rewards = row_rewards[0] / pow(10, DECIMALS)
+            adjusted_rewards = row_rewards[1] / pow(10, DECIMALS)
+            bonus = round(((row_rewards[1] - row_rewards[0]) / pow(10, DECIMALS)), 4)
+            active_stake = row_stake[0] / 1000000
+            live_stake = row_stake[1] / 1000000
+            epoch = row_epoch[0]
+            resp = make_response(
+                {
+                    'latest_epoch': str(epoch),
+                    'base_rewards': str(base_rewards),
+                    'bonus': str(bonus),
+                    'adjusted_rewards': str(adjusted_rewards),
+                    'active_stake': str(active_stake),
+                    'live_stake': str(live_stake)
+                }
+            )
+            resp.headers['Content-Type'] = 'application/json'
+            applog.info(f"/get_total_rewards: base rewards: {base_rewards}, adjusted rewards: {adjusted_rewards}")
+            return resp
+
+
 if __name__ == '__main__':
-    logging.info('Starting')
+    applog.info('Starting')
     app.run(
         threaded=True,
         host='0.0.0.0',

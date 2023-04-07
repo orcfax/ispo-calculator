@@ -2,7 +2,7 @@
 
 
 from library import *
-from koios_api.pool import get_pool_history, get_pool_delegators_history
+from koios_api.pool import get_pool_history, get_pool_delegators_history, get_pool_delegators
 import sqlite3
 import json
 
@@ -177,43 +177,52 @@ if __name__ == '__main__':
                     BONUS = 1.1
                 else:
                     BONUS = 1
-                rewards = int(active_stake * REWARDS_RATE * BONUS)
+                base_rewards = int(active_stake * REWARDS_RATE)
+                adjusted_rewards = int(active_stake * REWARDS_RATE * BONUS)
                 record = {
                     'Stake Addr': delegator,
                     'Active Stake': active_stake,
-                    'Rewards': rewards
+                    'Rewards': adjusted_rewards
                 }
                 total_delegators_per_epoch[epoch].append(record)
                 logging.debug(f"[ {epoch} - {pools[pool_id]['ticker']} ] "
                               f"{len(total_delegators_per_epoch[epoch]) + already_snapshotted} / "
                               f"{total_delegators_in_epoch} {delegator}")
                 """
+                Adjust the past rewards for the current wallet if it reached a new level of bonus
+                """
+                if epochs_delegated == 5 or epochs_delegated == 10 or epochs_delegated == 25 or epochs_delegated == 50:
+                    cur.execute("UPDATE wallets_history SET adjusted_rewards = base_rewards * ? "
+                                "WHERE wallet_id = ?", (BONUS, wallet_id))
+                conn.commit()
+                """
                 Insert record into wallets_history if not already there
                 or update it in case it is already present
                 """
                 epoch_id = epochs[epoch]['id']
+                logging.debug(f"epoch_id: {epoch_id}, wallet_id: {wallet_id}")
                 cur.execute("SELECT id FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
                             (wallet_id, epoch_id))
                 row = cur.fetchone()
                 if not row:
                     cur.execute("INSERT INTO wallets_history(wallet_id, epoch_id, pool_id, "
-                                "epochs_delegated, active_stake, rewards_amount) "
-                                "VALUES (?, ?, ?, ?, ?, ?)",
+                                "epochs_delegated, active_stake, base_rewards, adjusted_rewards) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                                 (wallet_id, epoch_id, pools[pool_id]['id'],
-                                 epochs_delegated, active_stake, rewards))
+                                 epochs_delegated, active_stake, base_rewards, adjusted_rewards))
                 else:
-                    cur.execute("UPDATE wallets_history SET pool_id = ?, "
-                                "epochs_delegated = ?, active_stake = ?, rewards_amount = ? "
+                    cur.execute("UPDATE wallets_history SET pool_id = ?, epochs_delegated = ?, "
+                                "active_stake = ?, base_rewards = ?, adjusted_rewards = ? "
                                 "WHERE wallet_id = ? AND epoch_id = ?",
                                 (pools[pool_id]['id'], epochs_delegated,
-                                 active_stake, rewards, wallet_id, epoch_id))
+                                 active_stake, base_rewards, adjusted_rewards, wallet_id, epoch_id))
                 conn.commit()
 
     """
     Generate the excel file from the database
     """
     sql = "SELECT w.stake_address, e.number, wh.epochs_delegated, " \
-          "wh.active_stake, wh.rewards_amount, p.ticker, w.id, e.id, p.id " \
+          "wh.active_stake, wh.adjusted_rewards, p.ticker, w.id, e.id, p.id " \
           "FROM wallets_history wh " \
           "JOIN epochs e ON e.id = wh.epoch_id " \
           "JOIN wallets w ON w.id = wh.wallet_id " \
@@ -227,7 +236,7 @@ if __name__ == '__main__':
         epoch = row[1]
         epochs_delegated = row[2]
         active_stake = row[3]
-        rewards_amount = row[4]
+        adjusted_rewards = row[4]
         pool = row[5]
         wallet_id = row[6]
         if str(epoch) not in delegators_per_epoch:
@@ -237,7 +246,7 @@ if __name__ == '__main__':
             'Pool': pool,
             'Epochs delegated': epochs_delegated,
             'Active Stake': active_stake,
-            'FACT Rewards': rewards_amount
+            'FACT Rewards': adjusted_rewards
         }
         delegators_per_epoch[str(epoch)].append(record)
 
@@ -245,6 +254,297 @@ if __name__ == '__main__':
 
     with open(FILES_PATH + '/delegators_per_epoch.json', 'w') as f:
         f.write(json.dumps(delegators_per_epoch, indent=2))
+
+    """
+    Create a snapshot of the live delegators, to estimate if the ISPO will end after the current epoch
+    Estimating the rewards for the next epoch
+    """
+    delegators = []
+    delegators_epochs_delegated = {}
+    total_estimated_rewards = 0
+    live_delegators = {}
+    logging.info('Estimating the rewards for the next epoch...')
+    for pool_id in pools:
+        ticker = pools[pool_id]['ticker']
+        live_delegators[pool_id] = get_pool_delegators(pool_id)
+        pool_total_estimated_rewards = 0
+        for item in live_delegators[pool_id]:
+            delegator = item['stake_address']
+            cur.execute("SELECT id FROM wallets WHERE stake_address = ?", (delegator,))
+            row = cur.fetchone()
+            if not row:
+                cur.execute("INSERT INTO wallets(stake_address) VALUES (?)", (delegator,))
+                wallet_id = cur.lastrowid
+                conn.commit()
+            else:
+                wallet_id = row[0]
+            wallets[delegator] = {'id': wallet_id}
+            live_stake = int(item['amount'])
+            # Calculate the number of delegated epochs for the current wallet
+            try:
+                prev_epoch_id = epochs[current_epoch]['id']
+            except KeyError as e:
+                epochs_delegated = 1
+            else:
+                cur.execute("SELECT epochs_delegated FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
+                            (wallet_id, prev_epoch_id))
+                row = cur.fetchone()
+                if not row:
+                    epochs_delegated = 1
+                else:
+                    epochs_delegated = row[0] + 1
+            delegators_epochs_delegated[delegator] = epochs_delegated
+            # calculate the rewards based on the active stake and bonuses for multiple epochs delegated
+            if epochs_delegated >= 50:
+                BONUS = 1.5
+            elif epochs_delegated >= 25:
+                BONUS = 1.3
+            elif epochs_delegated >= 10:
+                BONUS = 1.2
+            elif epochs_delegated >= 5:
+                BONUS = 1.1
+            else:
+                BONUS = 1
+            base_rewards = int(live_stake * REWARDS_RATE)
+            adjusted_rewards = int(live_stake * REWARDS_RATE * BONUS)
+            pool_total_estimated_rewards += adjusted_rewards
+            record = {
+                'Stake Addr': delegator,
+                'Pool': ticker,
+                'Live Stake': live_stake,
+                'Consecutive epochs delegated': epochs_delegated,
+                'Estimated Rewards': adjusted_rewards
+            }
+            delegators.append(record)
+            logging.info(record)
+        # the total
+        total_estimated_rewards += pool_total_estimated_rewards
+    delegators.append(
+        {
+            'Stake Addr': 'Total Estimated Rewards for the epoch',
+            'Pool': '',
+            'Live Stake': '',
+            'Consecutive epochs delegated': '',
+            'Estimated Rewards': total_estimated_rewards
+        }
+    )
+
+    """
+    The previous epochs, for which we have the active stake
+    The rewards are adjusted with the number of epochs delegated, including the estimated epoch
+    The number of epochs delegated in each sheet includes the estimated epoch
+    """
+    sql = "SELECT w.stake_address, e.number, " \
+          "wh.active_stake, p.ticker, w.id, e.id, p.id " \
+          "FROM wallets_history wh " \
+          "JOIN epochs e ON e.id = wh.epoch_id " \
+          "JOIN wallets w ON w.id = wh.wallet_id " \
+          "JOIN pools p on p.id = wh.pool_id " \
+          "ORDER BY wh.id"
+    cur.execute(sql)
+    rows = cur.fetchall()
+    delegators_per_epoch = {}
+    for row in rows:
+        stake_address = row[0]
+        epoch = row[1]
+        active_stake = row[2]
+        pool = row[3]
+        wallet_id = row[4]
+        if stake_address in delegators_epochs_delegated:
+            epochs_delegated = delegators_epochs_delegated[stake_address]
+        else:
+            epochs_delegated = 1
+        if epochs_delegated >= 50:
+            BONUS = 1.5
+        elif epochs_delegated >= 25:
+            BONUS = 1.3
+        elif epochs_delegated >= 10:
+            BONUS = 1.2
+        elif epochs_delegated >= 5:
+            BONUS = 1.1
+        else:
+            BONUS = 1
+        adjusted_rewards = int(active_stake * REWARDS_RATE * BONUS)
+        total_estimated_rewards += adjusted_rewards
+        if str(epoch) not in delegators_per_epoch:
+            delegators_per_epoch[str(epoch)] = []
+        record = {
+            'Stake Addr': stake_address,
+            'Pool': pool,
+            'Epochs delegated': epochs_delegated,
+            'Active Stake': active_stake,
+            'FACT Rewards': adjusted_rewards
+        }
+        delegators_per_epoch[str(epoch)].append(record)
+    delegators_per_epoch[str(current_epoch + 1) + '_estimated'] = []
+    for delegator in delegators:
+        delegators_per_epoch[str(current_epoch + 1) + '_estimated'].append(delegator)
+
+    # The grand total
+    delegators_per_epoch[str(current_epoch + 1) + '_estimated'].append(
+        {
+            'Stake Addr': 'Total Estimated Rewards for all epochs',
+            'Pool': '',
+            'Live Stake': '',
+            'Consecutive epochs delegated': '',
+            'Estimated Rewards': total_estimated_rewards
+        }
+    )
+    # write the Excel file with the estimated rewards for next epoch
+    write_excel_file(delegators_per_epoch, 'estimated_rewards_next_epoch.xlsx')
+
+    """
+    Estimate the rewards for the current_epoch + 2
+    """
+    delegators = []
+    delegators_epochs_delegated = {}
+    total_estimated_rewards = 0
+    logging.info('Estimating the rewards for 2 epoch from now...')
+    for pool_id in pools:
+        ticker = pools[pool_id]['ticker']
+        pool_total_estimated_rewards = 0
+        for item in live_delegators[pool_id]:
+            delegator = item['stake_address']
+            cur.execute("SELECT id FROM wallets WHERE stake_address = ?", (delegator,))
+            row = cur.fetchone()
+            if not row:
+                cur.execute("INSERT INTO wallets(stake_address) VALUES (?)", (delegator,))
+                wallet_id = cur.lastrowid
+                conn.commit()
+            else:
+                wallet_id = row[0]
+            wallets[delegator] = {'id': wallet_id}
+            live_stake = int(item['amount'])
+            # Calculate the number of delegated epochs for the current wallet
+            try:
+                prev_epoch_id = epochs[current_epoch]['id']
+            except KeyError as e:
+                epochs_delegated = 2
+            else:
+                cur.execute("SELECT epochs_delegated FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
+                            (wallet_id, prev_epoch_id))
+                row = cur.fetchone()
+                if not row:
+                    epochs_delegated = 2
+                else:
+                    epochs_delegated = row[0] + 2
+            delegators_epochs_delegated[delegator] = epochs_delegated
+            # calculate the rewards based on the active stake and bonuses for multiple epochs delegated
+            if epochs_delegated >= 50:
+                BONUS = 1.5
+            elif epochs_delegated >= 25:
+                BONUS = 1.3
+            elif epochs_delegated >= 10:
+                BONUS = 1.2
+            elif epochs_delegated >= 5:
+                BONUS = 1.1
+            else:
+                BONUS = 1
+            base_rewards = int(live_stake * REWARDS_RATE)
+            adjusted_rewards = int(live_stake * REWARDS_RATE * BONUS)
+            pool_total_estimated_rewards += adjusted_rewards
+            record = {
+                'Stake Addr': delegator,
+                'Pool': ticker,
+                'Live Stake': live_stake,
+                'Consecutive epochs delegated': epochs_delegated,
+                'Estimated Rewards': adjusted_rewards
+            }
+            delegators.append(record)
+            logging.info(record)
+        # the total
+        total_estimated_rewards += pool_total_estimated_rewards
+    delegators.append(
+        {
+            'Stake Addr': 'Total Estimated Rewards for the epoch',
+            'Pool': '',
+            'Live Stake': '',
+            'Consecutive epochs delegated': '',
+            'Estimated Rewards': total_estimated_rewards
+        }
+    )
+
+    """
+    The previous epochs, for which we have the active stake
+    The rewards are adjusted with the number of epochs delegated, including the estimated epoch
+    The number of epochs delegated in each sheet includes the estimated epoch
+    """
+    sql = "SELECT w.stake_address, e.number, " \
+          "wh.active_stake, p.ticker, w.id, e.id, p.id " \
+          "FROM wallets_history wh " \
+          "JOIN epochs e ON e.id = wh.epoch_id " \
+          "JOIN wallets w ON w.id = wh.wallet_id " \
+          "JOIN pools p on p.id = wh.pool_id " \
+          "ORDER BY wh.id"
+    cur.execute(sql)
+    rows = cur.fetchall()
+    delegators_per_epoch = {}
+    for row in rows:
+        stake_address = row[0]
+        epoch = row[1]
+        active_stake = row[2]
+        pool = row[3]
+        wallet_id = row[4]
+        if stake_address in delegators_epochs_delegated:
+            epochs_delegated = delegators_epochs_delegated[stake_address]
+        else:
+            epochs_delegated = 1
+        if epochs_delegated >= 50:
+            BONUS = 1.5
+        elif epochs_delegated >= 25:
+            BONUS = 1.3
+        elif epochs_delegated >= 10:
+            BONUS = 1.2
+        elif epochs_delegated >= 5:
+            BONUS = 1.1
+        else:
+            BONUS = 1
+        adjusted_rewards = int(active_stake * REWARDS_RATE * BONUS)
+        total_estimated_rewards += adjusted_rewards
+        if str(epoch) not in delegators_per_epoch:
+            delegators_per_epoch[str(epoch)] = []
+        record = {
+            'Stake Addr': stake_address,
+            'Pool': pool,
+            'Epochs delegated': epochs_delegated,
+            'Active Stake': active_stake,
+            'FACT Rewards': adjusted_rewards
+        }
+        delegators_per_epoch[str(epoch)].append(record)
+
+    delegators_per_epoch[str(current_epoch + 1) + '_estimated'] = []
+    for delegator in delegators:
+        delegators_per_epoch[str(current_epoch + 1) + '_estimated'].append(delegator)
+
+    # The grand total
+    delegators_per_epoch[str(current_epoch + 1) + '_estimated'].append(
+        {
+            'Stake Addr': 'Total Estimated Rewards for all epochs',
+            'Pool': '',
+            'Live Stake': '',
+            'Consecutive epochs delegated': '',
+            'Estimated Rewards': total_estimated_rewards
+        }
+    )
+
+    delegators_per_epoch[str(current_epoch + 2) + '_estimated'] = []
+    for delegator in delegators:
+        delegators_per_epoch[str(current_epoch + 2) + '_estimated'].append(delegator)
+        if delegator['Live Stake'] != '':
+            total_estimated_rewards += delegator['Estimated Rewards']
+
+    # The grand total
+    delegators_per_epoch[str(current_epoch + 2) + '_estimated'].append(
+        {
+            'Stake Addr': 'Total Estimated Rewards for all epochs',
+            'Pool': '',
+            'Live Stake': '',
+            'Consecutive epochs delegated': '',
+            'Estimated Rewards': total_estimated_rewards
+        }
+    )
+    # write the Excel file with the estimated rewards for next epoch
+    write_excel_file(delegators_per_epoch, 'estimated_rewards_in_2_epochs.xlsx')
 
     """
     Compare the information about the active stake saved into the database
