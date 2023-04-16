@@ -4,6 +4,7 @@ env = dict(os.environ)
 # START_EPOCH is the first epoch to be snapshotted using the active stake
 START_EPOCH = 400
 END_EPOCH = 450
+SNAPSHOT_EPOCH = 406
 POOL_IDS_BECH32 = ['pool10s6zdzdnncnfc200wnlp9endaeud76v424zdnurx9askwshm02x']  # FAX
 
 # rewards rate for the amount of ADA staked (assuming the $FACT token also has 6 decimals)

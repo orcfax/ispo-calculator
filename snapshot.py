@@ -166,6 +166,12 @@ if __name__ == '__main__':
                         epochs_delegated = 1
                     else:
                         epochs_delegated = row[0] + 1
+                # check if the wallet delegated in the past for a bigger number of consecutive epochs, then left
+                cur.execute("SELECT max(epochs_delegated) FROM wallets_history WHERE wallet_id = ?", (wallet_id,))
+                row = cur.fetchone()
+                if row[0] and row[0] > epochs_delegated:
+                    epochs_delegated = row[0]
+                    logging.debug(f"wallet {delegator} staked for {epochs_delegated} consecutive epochs in the past")
                 # calculate the rewards based on the active stake and bonuses for multiple epochs delegated
                 if epochs_delegated >= 50:
                     BONUS = 1.5
@@ -177,6 +183,20 @@ if __name__ == '__main__':
                     BONUS = 1.1
                 else:
                     BONUS = 1
+                # after the SNAPSHOT_EPOCH, active_stake cannot increase, and new wallets are not accepted
+                if current_epoch > SNAPSHOT_EPOCH:
+                    cur.execute("SELECT wh.active_stake FROM wallets_history wh JOIN epochs e ON wh.epoch_id = e.id "
+                                "WHERE wallet_id = ? AND e.number = ?", (wallet_id, SNAPSHOT_EPOCH))
+                    row = cur.fetchone()
+                    if not row:
+                        # new wallet, skip it
+                        logging.debug(f"new wallet {active_stake} skipped!")
+                        continue
+                    else:
+                        if active_stake > row[0]:
+                            logging.debug(f"active stake for wallet {delegator} increased "
+                                          f"from {active_stake} to {row[0]}, lowering it for the rewards calculation!")
+                            active_stake = row[0]
                 base_rewards = int(active_stake * REWARDS_RATE)
                 adjusted_rewards = int(active_stake * REWARDS_RATE * BONUS)
                 record = {
@@ -200,7 +220,6 @@ if __name__ == '__main__':
                 or update it in case it is already present
                 """
                 epoch_id = epochs[epoch]['id']
-                logging.debug(f"epoch_id: {epoch_id}, wallet_id: {wallet_id}")
                 cur.execute("SELECT id FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
                             (wallet_id, epoch_id))
                 row = cur.fetchone()
