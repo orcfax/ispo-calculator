@@ -154,24 +154,10 @@ if __name__ == '__main__':
                 wallets[delegator] = {'id': wallet_id}
                 active_stake = delegators_per_epoch[epoch][pool_id][delegator]['active_stake']
                 # Calculate the number of delegated epochs for the current wallet
-                try:
-                    prev_epoch_id = epochs[epoch - 1]['id']
-                except KeyError as e:
-                    epochs_delegated = 1
-                else:
-                    cur.execute("SELECT epochs_delegated FROM wallets_history WHERE wallet_id = ? and epoch_id = ?",
-                                (wallet_id, prev_epoch_id))
-                    row = cur.fetchone()
-                    if not row:
-                        epochs_delegated = 1
-                    else:
-                        epochs_delegated = row[0] + 1
-                # check if the wallet delegated in the past for a bigger number of consecutive epochs, then left
-                cur.execute("SELECT max(epochs_delegated) FROM wallets_history WHERE wallet_id = ?", (wallet_id,))
+                cur.execute("SELECT count(*) FROM wallets_history WHERE wallet_id = ? and epoch_id < ?",
+                            (wallet_id, epochs[epoch]['id']))
                 row = cur.fetchone()
-                if row[0] and row[0] > epochs_delegated:
-                    epochs_delegated = row[0]
-                    logging.debug(f"wallet {delegator} staked for {epochs_delegated} consecutive epochs in the past")
+                epochs_delegated = row[0] + 1
                 # calculate the rewards based on the active stake and bonuses for multiple epochs delegated
                 if epochs_delegated >= 50:
                     BONUS = 1.5
@@ -195,7 +181,7 @@ if __name__ == '__main__':
                     else:
                         if active_stake > row[0]:
                             logging.debug(f"active stake for wallet {delegator} increased "
-                                          f"from {active_stake} to {row[0]}, lowering it for the rewards calculation!")
+                                          f"from {row[0]} to {active_stake}, lowering it for the rewards calculation!")
                             active_stake = row[0]
                 base_rewards = int(active_stake * REWARDS_RATE)
                 adjusted_rewards = int(active_stake * REWARDS_RATE * BONUS)
