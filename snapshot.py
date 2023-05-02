@@ -184,7 +184,7 @@ if __name__ == '__main__':
                 else:
                     BONUS = 1
                 # after the SNAPSHOT_EPOCH, active_stake cannot increase, and new wallets are not accepted
-                if current_epoch > SNAPSHOT_EPOCH:
+                if epoch > SNAPSHOT_EPOCH:
                     cur.execute("SELECT wh.active_stake FROM wallets_history wh JOIN epochs e ON wh.epoch_id = e.id "
                                 "WHERE wallet_id = ? AND e.number = ?", (wallet_id, SNAPSHOT_EPOCH))
                     row = cur.fetchone()
@@ -570,6 +570,7 @@ if __name__ == '__main__':
     with the information from the pool_history API
     for all epoch except the current one, which is not provided by the pool_history API
     """
+    """
     for epoch in sorted_epochs:
         for pool_id in pools:
             if pool_id in pools_history[epoch]:
@@ -591,3 +592,4 @@ if __name__ == '__main__':
                                   f"total active stake: {active_stake} lovelace")
                     logging.error(f"Saved data: total delegators: {row[0]}, total active stake: {row[1]} lovelace")
     print(f"Snapshot done in {current_epoch}!")
+    """
