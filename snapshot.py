@@ -224,6 +224,36 @@ if __name__ == '__main__':
                 conn.commit()
 
     """
+    ISPO End - Last epoch adjustments
+    """
+    if current_epoch == END_EPOCH:
+        cur_epoch_id = epochs[current_epoch]['id']
+        cur.execute("SELECT sum(adjusted_rewards) FROM wallets_history")
+        total_rewards = cur.fetchone()[0]
+        print(f"Total rewards before adjustment: {total_rewards / pow(10, DECIMALS)}")
+        cur.execute("SELECT sum(adjusted_rewards) FROM wallets_history WHERE epoch_id = ?", (cur_epoch_id,))
+        total_rewards_last_epoch = cur.fetchone()[0]
+        print(f"Rewards for epoch {current_epoch}: {total_rewards_last_epoch / pow(10, DECIMALS)}")
+        if total_rewards > TOTAL_REWARDS:
+            # too many rewards granted in the last epoch
+            extra_rewards = total_rewards - TOTAL_REWARDS
+            print(f"Extra rewards given in epoch {current_epoch}: {extra_rewards / pow(10, DECIMALS)}")
+            multiplier = total_rewards_last_epoch / (extra_rewards + total_rewards_last_epoch)
+        else:
+            # too little rewards granted in the last epoch
+            extra_rewards = TOTAL_REWARDS - total_rewards
+            print(f"Extra rewards required for epoch {current_epoch}: {extra_rewards / pow(10, DECIMALS)}")
+            multiplier = (extra_rewards + total_rewards_last_epoch) / total_rewards_last_epoch
+        print(f"Rewards multiplier for epoch {current_epoch}: {multiplier}")
+        cur.execute("UPDATE wallets_history SET adjusted_rewards = adjusted_rewards * ? "
+                    "WHERE epoch_id = ?", (multiplier, cur_epoch_id))
+        conn.commit()
+        cur.execute("SELECT sum(adjusted_rewards) FROM wallets_history")
+        total_rewards = cur.fetchone()[0]
+        print(f"Total rewards after adjustment: {total_rewards / pow(10, DECIMALS)}")
+
+    exit(0)
+    """
     Generate the excel file from the database
     """
     sql = "SELECT w.stake_address, e.number, wh.epochs_delegated, " \

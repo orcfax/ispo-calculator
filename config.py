@@ -3,7 +3,7 @@ import os
 env = dict(os.environ)
 # START_EPOCH is the first epoch to be snapshotted using the active stake
 START_EPOCH = 400
-END_EPOCH = 450
+END_EPOCH = 414
 SNAPSHOT_EPOCH = 406
 POOL_IDS_BECH32 = ['pool10s6zdzdnncnfc200wnlp9endaeud76v424zdnurx9askwshm02x']  # FAX
 
@@ -11,6 +11,7 @@ POOL_IDS_BECH32 = ['pool10s6zdzdnncnfc200wnlp9endaeud76v424zdnurx9askwshm02x']  
 # rewards = REWARDS_RATE * active_stake
 DECIMALS = 6
 REWARDS_RATE = 1 / 10
+TOTAL_REWARDS = 100000000 * pow(10, DECIMALS)
 
 # settings
 FILES_PATH = os.getenv('FILES_PATH', 'files')
@@ -19,7 +20,7 @@ DB_PATH = os.getenv('DB_PATH', 'db')
 SNAPSHOT_LOG_FILE = os.getenv('SNAPSHOT_LOG_FILE', LOGS_PATH + '/snapshot.log')
 DB_NAME = DB_PATH + '/ispo.db'
 
-API_PORT = 3000
+API_PORT = 3080
 API_LOG_FILE = os.getenv('API', LOGS_PATH + '/api.log')
 API_NAME = os.getenv('API_NAME', 'Rewards API')
 API_DESCRIPTION = os.getenv('API_DESCRIPTION', 'A simple API for providing the accumulated ISPO rewards')
