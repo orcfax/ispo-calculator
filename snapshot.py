@@ -226,7 +226,8 @@ if __name__ == '__main__':
     """
     ISPO End - Last epoch adjustments
     """
-    if current_epoch == END_EPOCH:
+    if current_epoch >= END_EPOCH:
+        current_epoch = END_EPOCH
         cur_epoch_id = epochs[current_epoch]['id']
         cur.execute("SELECT sum(adjusted_rewards) FROM wallets_history")
         total_rewards = cur.fetchone()[0]
@@ -252,7 +253,6 @@ if __name__ == '__main__':
         total_rewards = cur.fetchone()[0]
         print(f"Total rewards after adjustment: {total_rewards / pow(10, DECIMALS)}")
 
-    exit(0)
     """
     Generate the excel file from the database
     """
@@ -289,6 +289,12 @@ if __name__ == '__main__':
 
     with open(FILES_PATH + '/delegators_per_epoch.json', 'w') as f:
         f.write(json.dumps(delegators_per_epoch, indent=2))
+
+    """
+    Exit if ISPO ended
+    """
+    if current_epoch >= END_EPOCH:
+        exit(0)
 
     """
     Create a snapshot of the live delegators, to estimate if the ISPO will end after the current epoch
